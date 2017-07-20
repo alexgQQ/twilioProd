@@ -5,6 +5,8 @@ from flask import Flask
 from flask import Response
 from flask import request
 from flask import render_template
+from flask import redirect
+from flask import url_for
 from twilio import twiml
 from twilio.rest import Client
 from zenpy import Zenpy
@@ -53,14 +55,15 @@ app = Flask(__name__)
 
 #	Root URL for the app. Calls will start here.
 
-@app.route('/')
+@app.route('/i')
 def index():
     return render_template('index.html')
 
-@app.route("/home", methods=['GET', 'POST'])
+@app.route("/", methods=['GET', 'POST'])
 def voiceGreeting():
     currentDay = time.strftime("%A")
     currentTime = int(time.strftime("%H"))
+
     if((currentDay == 'Saturday') or (currentDay == 'Sunday') or (currentTime >= 18) or (currentTime < 10)):
     	resp = VoiceResponse()
     	resp.play(afterHours_mp3)
@@ -77,24 +80,65 @@ def voiceGreeting():
 
 @app.route("/key-handle", methods=['GET', 'POST'])
 def key_handle():
-	digitPressed = request.values.get('Digits', None)
+	digitPressed = request.form['Digits']
+	resp = VoiceResponse()
 	if digitPressed == "1":
-		resp = VoiceResponse()
 		resp.redirect("/voicemail-handle")
 		return str(resp)
 	elif digitPressed != "1":
-		resp = VoiceResponse()
-		#resp.enqueue("Hold Queue", wait_url="/hold-handle", waitUrlMethod='GET')
-		dial = Dial()
-		dial.conference("TEST", wait_url="/hold-handle")
-		resp.append(dial)
+		resp.enqueue("Hold Queue", wait_url="/callQ-handle")
 		return str(resp)
+
+@app.route("/callQ-handle", methods=['GET', 'POST'])
+def callQ_handle():
+	resp = VoiceResponse()
+	conferences = client.conferences.list(status="in-progress", friendly_name="TEST")
+	if(conferences == [])
+		resp.redirect("/pop-first")
+	resp.play(hold_mp3, loop=1)
+	return str(resp)
+
+@app.route("/pop-first", methods=['GET', 'POST'])
+def pop_first():
+	resp = VoiceResponse()
+	queueSID = client.queues.list(friendly_name="Hold Queue")[0].sid
+	client.queues(queueSID).members("Front").update(url="/conf-handle", method = "POST")
+	return str(resp)
+
 
 @app.route("/conf-handle", methods=['GET', 'POST'])
 def conf_handle():
+	resp = VoiceResponse()
 	dial = Dial()
-	dial.conference("TEST")
-	return "YAY!"
+	dial.conference("TEST", wait_url="/call-agent",
+									status="end", 
+									end_conference_on_exit=True,
+									status_callback="/pop-first")
+	resp.append(dial)
+	return str(resp)
+
+@app.route("/conf-mod", methods=['GET', 'POST'])
+def conf_mod():
+	resp = VoiceResponse()
+	dial = Dial(hangup_on_star=True, action='/gather-mod')
+	dial.conference("TEST", wait_url="/hold-handle")
+	resp.append(dial)
+	return str(resp)
+
+@app.route("/gather-mod", methods=['GET', 'POST'])
+def gather_mod():
+	resp = VoiceResponse()
+	conferences = client.conferences.list(status="in-progress", friendly_name="TEST")
+	confID = client.conferences.list()[0].sid
+	print(request.method)
+#	if (request.form['Digits'] == "*"):
+#		print("*")
+#		resp.redirect("/conf-mod")
+#	else:
+#		print("!*")
+#		Gather(numDigit=1, action="/gather-mod", method="POST")
+	return str(resp)
+
 
 @app.route("/voicemail-handle", methods=['GET', 'POST'])
 def leave_vm():
@@ -105,7 +149,7 @@ def leave_vm():
 		max_length = 120,
 		finish_on_key = '*',
 		transcribe = True,
-		action = "/recording-handle",
+		action = "/vm-exit",
 		transcribe_callback = "/transcribe-handle"
 		)
 	return str(resp)
@@ -124,23 +168,21 @@ def vm_exit():
 	resp.hangup()
 	return str(resp)
 
-@app.route("/recording-handle", methods=['GET', 'POST'])
-def recording_handle():
-	resp = VoiceResponse()
-	resp.say("Thank you for leaving a voicemail. We will get back to you as soon as we can.")
-	time.sleep(30)
-	resp.hangup()
-	return str(resp)
-
 @app.route("/hold-handle", methods=['GET', 'POST'])
 def hold_handle():
 	resp = VoiceResponse()
 	resp.play(hold_mp3, loop=0)
-	call = client.calls.create(to="+14086474636",
-                           from_="+19704091327",
-                           url="/conf-handle")
 	return str(resp)
 	
+@app.route("/call-agent", methods=['GET', 'POST'])
+def call_agent():
+	resp = VoiceResponse()
+	call = client.calls.create(to="+17204412178",
+                           from_="+19704091327",
+                           url="http://91c9adb2.ngrok.io/conf-mod")
+	resp.redirect("/hold-handle")
+	return str(resp)
+
 if __name__ == '__main__':
     # Note that in production, you would want to disable debugging
     app.run(debug=True)
