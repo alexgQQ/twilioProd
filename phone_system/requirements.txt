@@ -17,6 +17,6 @@ six==1.10.0
 twilio==6.4.3
 urllib3==1.21.1
 virtualenv==15.1.0
-waitress==1.0.2
+waitress==1.4.1
 Werkzeug==0.12.2
 zenpy==1.2.2
